@@ -8,7 +8,7 @@ z_max = 5;        % Maximum extent in z [physical units]
 z_stp = 0.5;       % Sampling step size in z [physical units]
 sigt = 1;          % Total scattering coefficient
 lambda = 0.532;    % Wavelength [physical units]
-is_cyclic = 0;     % Boundary condition flag
+is_cyclic = 1;     % Boundary condition flag (cyclic; keeps this grid consistent with getPropConvKerFreq3D.m's kernel sizing)
 
 spr_params.rad_rng = 0.5;   % Radius range
 spr_params.rad_min = 0.2;   % Minimum radius

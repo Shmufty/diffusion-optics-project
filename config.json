@@ -1,0 +1,26 @@
+{
+  "_notes": {
+    "units": "All length quantities (x_max, x_stp, z_max, z_stp, lambda, sphere radii) are in the same consistent unit; values below assume micrometers (um), chosen because x_stp must stay sub-wavelength for the angular-spectrum sampling in getPropConvKerFreq3D.m to be valid. sigt is in 1/um accordingly.",
+    "M_planes": "Number of MWFS aberration/correction planes M = Nzs, the number of coarse z-slices produced by tissue_3d_generator.m (derived from z_max and z_stp, not set independently).",
+    "epsilon": "Inter-plane propagation distance epsilon = z_stp (the coarse z-grid spacing tissue_3d_generator.m downsamples to).",
+    "N_image": "Transverse image size N (u_in in C^(N^2 x 1)) = Nx from tissue_3d_generator.m, derived from x_max and x_stp.",
+    "is_cyclic": "Set to 1 (cyclic/periodic boundary) so tissue_3d_generator.m's output grid (Nx=201x201 for the values below) matches getPropConvKerFreq3D.m's kernel grid when both are called with the same x_max and is_cyclic=1. With is_cyclic=0, tissue_3d_generator.m pads its working domain to 2x (bdr_fact=2) before cropping back to Nx, while getPropConvKerFreq3D.m applied to the same x_max would size its kernel off the padded (401x401) domain -- a dimension mismatch. is_cyclic=1 removes that padding on both sides, keeping the field and kernel grids consistent."
+  },
+  "tissue": {
+    "x_max": 10,
+    "x_stp": 0.1,
+    "z_max": 5,
+    "z_stp": 0.5,
+    "sigt": 1,
+    "lambda": 0.532,
+    "is_cyclic": 1
+  },
+  "spr_params": {
+    "rad_rng": 0.5,
+    "rad_min": 0.2,
+    "ref_rng": 0.05,
+    "ref_min": 0.0,
+    "od": 1,
+    "scl": 1
+  }
+}
