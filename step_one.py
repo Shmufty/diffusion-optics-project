@@ -1,6 +1,6 @@
 """Sim step 1 (see 'Diffusion optics project guidelines.docx').
 
-M=2 aberration planes A, B (from 2_planes_system/tissue_output_2planes.mat).
+M=2 aberration planes A, B (from 2_planes_system/tissue_output_2planes_*.mat).
 Ideal correction: A~ = conj(A), B~ = conj(B).
 
 u_out = P(-eps)@A~ @ P(-eps)@B~ @ B @ P(eps)@A @ P(eps) @ u_in
@@ -10,13 +10,28 @@ evanescent components dropped (see the added "Propagation kernel used in
 step 1" section of the guidelines docx). lambda is given in nm; all
 spatial quantities (x_stp, eps, ...) are in um.
 """
+import glob
+import os
+
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 
-MAT_PATH = "2_planes_system/tissue_output_2planes.mat"
+MAT_PATH = "2_planes_system/tissue_output_2planes_20x20x10.mat"
+OUTPUT_DIR = "step 1 results"
 LAMBDA_NM = 532.0
 LAMBDA_UM = LAMBDA_NM * 1e-3
+
+correct_plane_A = 0
+correct_plane_B = 0
+
+# Multiplies the plotted (not physical) amplitude for a brighter image.
+# Each panel's color scale is still capped at that panel's own true peak
+# (so the colorbar stays physically meaningful), but the gain is applied
+# *before* the clip -- boosting sub-peak detail (e.g. faint speckle) into
+# visible range faster, instead of just rescaling (which would be a no-op
+# under plain autoscale, since scaling data and its own max cancels out).
+amplitude_gain = 5
 
 
 def angular_spectrum_propagate(u, z_um, lam_um, dx_um):
@@ -38,7 +53,13 @@ def load_planes(mat_path):
         mask_f = np.transpose(mask_f, (2, 1, 0))  # -> (Nx, Ny, M), matches MATLAB mask_f(:,:,k)
         dx_um = float(np.asarray(f["x_stp"]).squeeze())
         eps_um = float(np.asarray(f["Delta"]).squeeze())
-    return mask_f, dx_um, eps_um
+        tissue_dims_um = np.asarray(f["tissue_dims_um"]).squeeze()  # [width_x, width_y, depth_z]
+    return mask_f, dx_um, eps_um, tissue_dims_um
+
+
+def dims_tag(tissue_dims_um):
+    """e.g. [20.,20.,10.] -> '20x20x10', for filenames/titles."""
+    return "x".join(f"{d:g}" for d in tissue_dims_um)
 
 
 def compute_planes(mask_f):
@@ -57,8 +78,9 @@ def compute_planes(mask_f):
     return A, B, A_tilde, B_tilde
 
 
-def main():
-    mask_f, dx_um, eps_um = load_planes(MAT_PATH)
+def main(mat_path=MAT_PATH, show=True):
+    mask_f, dx_um, eps_um, tissue_dims_um = load_planes(mat_path)
+    tag = dims_tag(tissue_dims_um)
     n = mask_f.shape[0]
 
     A, B, A_tilde, B_tilde = compute_planes(mask_f)
@@ -71,57 +93,63 @@ def main():
 
     u2 = angular_spectrum_propagate(u_after_A, eps_um, LAMBDA_UM, dx_um)
     u_after_B = B * u2  # = field leaving the tissue
-    u_after_Btilde = B_tilde * u_after_B
+
+    if correct_plane_B:
+        u_after_Btilde = B_tilde * u_after_B
+    else:
+        u_after_Btilde = u_after_B
 
     u3 = angular_spectrum_propagate(u_after_Btilde, -eps_um, LAMBDA_UM, dx_um)
-    u_after_Atilde = A_tilde * u3
+    
+    if correct_plane_A:
+        u_after_Atilde = A_tilde * u3
+    else:
+        u_after_Atilde = u3
 
     u_out = angular_spectrum_propagate(u_after_Atilde, -eps_um, LAMBDA_UM, dx_um)
 
-    planes = [
-        ("A (aberration, plane 1)", A),
-        ("B (aberration, plane 2)", B),
-        ("A~ = conj(A) (correction)", A_tilde),
-        ("B~ = conj(B) (correction)", B_tilde),
-    ]
-
-    fig, axes = plt.subplots(1, len(planes), figsize=(4 * len(planes), 4))
-    for ax, (title, plane) in zip(axes, planes):
-        im = ax.imshow(np.angle(plane), cmap="twilight", vmin=-np.pi, vmax=np.pi)
-        ax.set_title(title, fontsize=9)
-        ax.axis("off")
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="phase [rad]")
-    fig.suptitle("Sim step 1: aberration / correction planes (phase, since |A|=|B|=1)")
-    fig.tight_layout()
-    fig.savefig("step_one_planes.png", dpi=150)
-    print("Saved plot to step_one_planes.png")
-
     fields = [
-        ("input field |u_in|", u_in),
-        ("after aberration A", u_after_A),
-        ("after aberration B (tissue output)", u_after_B),
-        ("after correction B~", u_after_Btilde),
-        ("after correction A~", u_after_Atilde),
-        ("after further eps propagation (u_out)", u_out),
+        ("input field |u_in|", u_in, False),
+        ("after aberration A", u_after_A, False),
+        ("after aberration B (tissue output)", u_after_B, False),
+        ("after correction B~" if correct_plane_B else "B~ correction skipped", u_after_Btilde, False),
+        ("after correction A~" if correct_plane_A else "A~ correction skipped", u_after_Atilde, False),
+        ("after further eps propagation (u_out)", u_out, True),
     ]
 
     fig, axes = plt.subplots(1, len(fields), figsize=(4 * len(fields), 4))
-    for ax, (title, field) in zip(axes, fields):
-        im = ax.imshow(np.abs(field), cmap="inferno")
+    for ax, (title, field, apply_gain) in zip(axes, fields):
+        amp = np.abs(field)
+        vmax = amp.max()
+        if apply_gain:
+            amp = np.clip(amp * amplitude_gain, 0, vmax)
+        im = ax.imshow(amp, cmap="inferno", vmin=0, vmax=vmax)
         ax.set_title(title, fontsize=9)
         ax.axis("off")
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    fig.suptitle("Sim step 1: M=2 aberration planes, ideal conjugate correction")
+    fig.suptitle(f"Sim step 1: M=2 aberration planes, tissue {tag} um, ideal conjugate correction")
     fig.tight_layout()
-    fig.savefig("step_one_fields.png", dpi=150)
-    print("Saved plot to step_one_fields.png")
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    skipped = [name for name, on in [("noA", correct_plane_A), ("noB", correct_plane_B)] if not on]
+    suffix = "" if not skipped else "_" + "_".join(skipped)
+    filename = f"step_one_fields_{tag}{suffix}.png"
+    out_path = os.path.join(OUTPUT_DIR, filename)
+    fig.savefig(out_path, dpi=150)
+    print(f"Saved plot to {out_path}")
 
     residual = np.linalg.norm(np.abs(u_out) - np.abs(u_in)) / np.linalg.norm(np.abs(u_in))
     print(f"||u_out| - |u_in|| / ||u_in|| = {residual:.4f}  "
           f"(nonzero: exact correction only holds within the propagating/non-evanescent band)")
 
-    plt.show()
+    if show:
+        plt.show()
 
 
 if __name__ == "__main__":
-    main()
+    all_tissues = sorted(glob.glob("2_planes_system/tissue_output_2planes_*.mat"))
+    skip = ["50x50x10"]  # skip plotting these tissues for now
+    for path in all_tissues:
+        if any(tag in path for tag in skip):
+            continue
+        main(mat_path=path)

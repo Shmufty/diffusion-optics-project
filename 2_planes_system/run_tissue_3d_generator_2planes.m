@@ -54,14 +54,17 @@ assert(size(mask_f, 3) == M, 'Expected %d aberration planes, got %d', M, size(ma
 % placed at k*Delta, so plane M sits exactly at the exit face z=Z_tissue.
 plane_z = (1:M)*Delta;   % [1 x M], e.g. [Z_tissue/2, Z_tissue] for M=2
 
+% Full simulated tissue dimensions [width_x, width_y, depth_z], physical units (um).
+tissue_dims_um = [2*x_max, 2*x_max, Z_tissue];
+
 %% === Gather from GPU and save for Python ===
 mask_f  = gather(mask_f);
 mask_f0 = gather(mask_f0);
 z_grid1 = gather(z_grid1);
 
-out_file = 'tissue_output_2planes.mat';
+out_file = sprintf('tissue_output_2planes_%gx%gx%g.mat', tissue_dims_um(1), tissue_dims_um(2), tissue_dims_um(3));
 save(out_file, 'mask_f', 'mask_f0', 'z_grid1', ...
-    'x_max', 'x_stp', 'z_max', 'M', 'Z_tissue', 'Delta', 'plane_z', '-v7.3');
+    'x_max', 'x_stp', 'z_max', 'M', 'Z_tissue', 'Delta', 'plane_z', 'tissue_dims_um', '-v7.3');
 
-fprintf('Saved outputs to %s (Nplanes = %d, Delta = %.3f, plane_z = %s)\n', ...
-    out_file, size(mask_f, 3), Delta, mat2str(plane_z));
+fprintf('Saved outputs to %s (Nplanes = %d, Delta = %.3f, plane_z = %s, tissue_dims_um = %s)\n', ...
+    out_file, size(mask_f, 3), Delta, mat2str(plane_z), mat2str(tissue_dims_um));
