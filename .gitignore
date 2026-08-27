@@ -219,3 +219,8 @@ __marimo__/
 
 # Project-specific: generated plots
 *.png
+
+# Project-specific: large generated tissue volumes (regenerate via the
+# corresponding run_*.m script) -- well over GitHub's 100MB push limit,
+# no Git LFS set up in this repo.
+capillary_system/*.mat

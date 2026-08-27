@@ -1,4 +1,4 @@
-function [mask_f,mask_f0,z_grid1]=tissue_3d_generator(x_max,x_stp,z_max,z_stp,sigt,spr_params,lambda,is_cyclic)
+function [mask_f,mask_f0,z_grid1,mask_f_hr,mask_f0_hr,z_grid1_sps]=tissue_3d_generator(x_max,x_stp,z_max,z_stp,sigt,spr_params,lambda,is_cyclic)
 % tissue_3d_generator: Generates 3D phase masks with spherical scatterers
 %
 % Inputs:
@@ -11,9 +11,14 @@ function [mask_f,mask_f0,z_grid1]=tissue_3d_generator(x_max,x_stp,z_max,z_stp,si
 %   lambda: Wavelength [physical units]
 %   is_cyclic: Flag for cyclic boundary conditions (default: 0)
 % Outputs:
-%   mask_f: Final phase mask [Nx × Nx × Nzs]
-%   mask_f0: Phase mask without mean field [Nx × Nx × Nzs]
+%   mask_f: Final phase mask [Nx × Nx × Nzs], coarse (downsampled) z-grid
+%   mask_f0: Phase mask without mean field [Nx × Nx × Nzs], coarse z-grid
 %   z_grid1: Fine z-grid coordinates [1 × Nz]
+%   mask_f_hr: Final phase mask [Nx × Nx × Nz], fine (pre-downsampling) z-grid
+%   mask_f0_hr: Phase mask without mean field [Nx × Nx × Nz], fine z-grid
+%   z_grid1_sps: Coarse z-grid coordinates [1 × Nzs] (generator-internal,
+%                symmetric about its own z=0 -- see run_tissue_3d_generator_2planes.m
+%                for the forward (z=0 at entrance) convention used elsewhere)
 
 % === Initialize parameters and boundary conditions ===
 if~exist('is_cyclic','var')
@@ -188,15 +193,26 @@ mask_f0_hr_t=zeros(Nx,Nx,Nz,'gpuArray');  % [Nx × Nx × Nz] Temporary scaled ma
 fprintf('=== Downsampling Loop ===\n');
 
 % === Loop over coarse z-layers and average fine layers ===
+% NOTE: tolerance must scale with the bin half-width (h_z_stp), not a
+% fixed x_stp-based value -- a fixed x_stp*0.75 tolerance only ever
+% catches 1-2 fine layers regardless of smp_z, silently turning each
+% coarse "plane" into a thin slice instead of a genuine smp_z-layer
+% average. Safety bound (verified): the nearest in-bin fine sample sits
+% h_z_stp-h_x_stp from center, the nearest out-of-bin sample sits
+% h_z_stp+h_x_stp away, so any epsilon in [0, h_x_stp) is safe; x_stp*0.1
+% has margin to spare and matches this file's existing epsilon style
+% (see the iix/iiz cropping above, which uses x_stp/10).
 for j=1:Nzs
     % Find fine z-layers that correspond to this coarse layer:
-    ii0=find(abs(z_grid1-z_grid1_sps(j))<x_stp*0.75);  % [1 × Nfine] Indices (typically smp_z indices)
-    
+    ii0=find(abs(z_grid1-z_grid1_sps(j))<=h_z_stp+x_stp*0.1);  % [1 × Nfine] Indices (should be smp_z indices)
+    assert(length(ii0)==round(smp_z), ...
+        'Expected %d fine layers in coarse bin j=%d, got %d', round(smp_z), j, length(ii0));
+
     % Debug for first few iterations
     if j <= 3 || isempty(ii0)
         fprintf('\nIteration j=%d/%d:\n', j, Nzs);
         fprintf('  Target z-position: %.6f\n', z_grid1_sps(j));
-        fprintf('  Search tolerance: %.6f (x_stp*0.75)\n', x_stp*0.75);
+        fprintf('  Search tolerance: %.6f (h_z_stp+x_stp*0.1)\n', h_z_stp+x_stp*0.1);
         fprintf('  Found indices ii0: %s\n', mat2str(ii0));
         fprintf('  Number of matches: %d\n', length(ii0));
         
