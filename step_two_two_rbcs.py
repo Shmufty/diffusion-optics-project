@@ -153,8 +153,8 @@ def compute_planes_at(t, bg, x_grid1, t_entry_2, h_z_stp):
     """A, B phase-only planes (M=2) at time t for the two-RBC scenario --
     carves both cells' current geometry into the fine background volume
     and reconstructs the coarse planes. Factored out so other scripts
-    (e.g. rbc_flow_correction.py) can reuse this exact computation rather
-    than re-deriving it."""
+    (e.g. main.py) can reuse this exact computation rather than
+    re-deriving it."""
     y_max = bg["x_max"]
     edges_1 = cell_edges(t, 0.0, y_max)
     edges_2 = cell_edges(t, t_entry_2, y_max)

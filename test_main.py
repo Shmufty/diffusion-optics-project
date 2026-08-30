@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from step_one import LAMBDA_UM, angular_spectrum_propagate
-from rbc_flow_correction import run_pipeline
+from main import run_pipeline
 
 
 def _random_phase_plane(n, seed):
