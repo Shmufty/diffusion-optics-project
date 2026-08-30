@@ -149,6 +149,24 @@ def carve_fine_volume_multi(t, mask_f_hr, x_grid1, z_grid1, cell_intervals, rbc_
     return combined, touched
 
 
+def compute_planes_at(t, bg, x_grid1, t_entry_2, h_z_stp):
+    """A, B phase-only planes (M=2) at time t for the two-RBC scenario --
+    carves both cells' current geometry into the fine background volume
+    and reconstructs the coarse planes. Factored out so other scripts
+    (e.g. rbc_flow_correction.py) can reuse this exact computation rather
+    than re-deriving it."""
+    y_max = bg["x_max"]
+    edges_1 = cell_edges(t, 0.0, y_max)
+    edges_2 = cell_edges(t, t_entry_2, y_max)
+    combined, touched = carve_fine_volume_multi(
+        t, bg["mask_f_hr"], x_grid1, bg["z_grid1"], [edges_1, edges_2], RBC_DELTA_N)
+    coarse = reconstruct_coarse(
+        combined, touched, bg["mask_f"], bg["z_grid1"], bg["z_grid1_sps"], h_z_stp, bg["x_stp"])
+    A = np.exp(1j * np.angle(coarse[:, :, 0]))
+    B = np.exp(1j * np.angle(coarse[:, :, 1]))
+    return A, B
+
+
 def main():
     bg = load_background(MAT_PATH)
     Nx = bg["mask_f_hr"].shape[0]
@@ -160,17 +178,7 @@ def main():
     print(f"Cell 2 entry time: {t_entry_2:.3f}s")
     print(f"Recording {len(timesteps)} timesteps: t=0 to {timesteps[-1]:.2f}s")
 
-    planes_by_t = []
-    for t in timesteps:
-        edges_1 = cell_edges(t, 0.0, y_max)
-        edges_2 = cell_edges(t, t_entry_2, y_max)
-        combined, touched = carve_fine_volume_multi(
-            t, bg["mask_f_hr"], x_grid1, bg["z_grid1"], [edges_1, edges_2], RBC_DELTA_N)
-        coarse = reconstruct_coarse(
-            combined, touched, bg["mask_f"], bg["z_grid1"], bg["z_grid1_sps"], h_z_stp, bg["x_stp"])
-        A = np.exp(1j * np.angle(coarse[:, :, 0]))
-        B = np.exp(1j * np.angle(coarse[:, :, 1]))
-        planes_by_t.append((A, B))
+    planes_by_t = [compute_planes_at(t, bg, x_grid1, t_entry_2, h_z_stp) for t in timesteps]
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     dims = bg["tissue_dims_um"]
