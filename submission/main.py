@@ -112,13 +112,25 @@ def run_pipeline_uncorrected(u_in, A_t, B_t, eps_um, dx_um):
     return u_out_uncorrected
 
 
-def plot_grid(values_by_t, timesteps, vmax, title, out_path):
+def crop_center(arr, size):
+    """size x size window centered on arr's own center pixel (arr is
+    square, same convention as the point source placed at [Nx//2, Nx//2])."""
+    n = arr.shape[0]
+    half = size // 2
+    start = n // 2 - half
+    return arr[start:start + size, start:start + size]
+
+
+def plot_grid(values_by_t, timesteps, vmax, title, out_path, crop=None):
     n_rows = -(-len(timesteps) // GRID_COLS)  # ceil
     fig, axes = plt.subplots(n_rows, GRID_COLS, figsize=(4 * GRID_COLS, 4 * n_rows))
     axes = np.atleast_2d(axes)
     for i, t in enumerate(timesteps):
         ax = axes[i // GRID_COLS, i % GRID_COLS]
-        im = ax.imshow(np.abs(values_by_t[i]), cmap="inferno", vmin=0, vmax=vmax)
+        amp = np.abs(values_by_t[i])
+        if crop:
+            amp = crop_center(amp, crop)
+        im = ax.imshow(amp, cmap="inferno", vmin=0, vmax=vmax)
         ax.set_title(f"t={t:g}s", fontsize=10)
         ax.axis("off")
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -232,6 +244,16 @@ def main():
         f"Sim step 3: t=0-calibrated (fixed) correction applied through the flow, "
         f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue, |u_out|",
         os.path.join(OUTPUT_DIR, "rbc_flow_correction_u_out.png"),
+    )
+    # Same data, cropped to a 50x50 PIXEL window (5x5um, since x_stp=0.1um)
+    # around the frame center -- the full-frame view above makes the spot
+    # too small to see clearly against the 351x351 pixel field.
+    plot_grid(
+        u_out_by_t, timesteps, vmax,
+        f"Sim step 3: t=0-calibrated (fixed) correction applied through the flow, "
+        f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue, |u_out| (cropped 50x50px around center)",
+        os.path.join(OUTPUT_DIR, "rbc_flow_correction_u_out_cropped50.png"),
+        crop=50,
     )
     plot_grid(
         u_out_uncorrected_by_t, timesteps, vmax,
