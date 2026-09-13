@@ -143,6 +143,30 @@ def plot_grid(values_by_t, timesteps, vmax, title, out_path, crop=None):
     print(f"Saved plot to {out_path}")
 
 
+def plot_input_field(u_in, out_path, crop=20):
+    """u_in is an ideal point source: a single bright pixel at the array
+    center, zero everywhere else. Two panels: the full frame (to show its
+    location/scale relative to the Nx x Nx grid) and a tight crop around
+    the center (to actually see the nonzero pixel)."""
+    amp = np.abs(u_in)
+    fig, axes = plt.subplots(1, 2, figsize=(9, 4.5))
+
+    im0 = axes[0].imshow(amp, cmap="inferno", vmin=0, vmax=amp.max())
+    axes[0].set_title("full frame", fontsize=10)
+    axes[0].axis("off")
+    fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+
+    im1 = axes[1].imshow(crop_center(amp, crop), cmap="inferno", vmin=0, vmax=amp.max())
+    axes[1].set_title(f"cropped {crop}x{crop}px around center", fontsize=10)
+    axes[1].axis("off")
+    fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+
+    fig.suptitle("Input field u_in: ideal point source, |u_in|")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    print(f"Saved plot to {out_path}")
+
+
 def compute_g2_spatial(fields_by_t):
     """g2(tau) = <I(0)I(tau)>/<I(0)I(0)>, with <...> a SPATIAL average
     (mean over all pixels of the element-wise product) referenced to the
@@ -238,6 +262,8 @@ def main():
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     dims = bg["tissue_dims_um"]
+
+    plot_input_field(s["u_in"], os.path.join(OUTPUT_DIR, "input_field.png"))
 
     plot_grid(
         u_out_by_t, timesteps, vmax,
