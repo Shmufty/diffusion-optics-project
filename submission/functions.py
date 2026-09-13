@@ -25,7 +25,27 @@ LAMBDA_UM = LAMBDA_NM * 1e-3
 
 
 def angular_spectrum_propagate(u, z_um, lam_um, dx_um):
-    """Exact angular spectrum propagation by z_um; evanescent components dropped."""
+    """Propagate a 2D field using the angular-spectrum method.
+
+    Parameters
+    ----------
+    u : numpy.ndarray
+        Complex-valued square input field sampled on a uniform 2D grid.
+    z_um : float
+        Propagation distance in micrometres. Positive values propagate
+        forward according to the chosen phase convention.
+    lam_um : float
+        Wavelength in micrometres.
+    dx_um : float
+        Spatial sampling interval in both transverse directions, in
+        micrometres.
+
+    Returns
+    -------
+    numpy.ndarray
+        Complex-valued propagated field with the same shape as ``u``.
+        Evanescent spatial-frequency components are discarded.
+    """
     n = u.shape[0]
     fx = np.fft.fftfreq(n, d=dx_um)
     fx_grid, fy_grid = np.meshgrid(fx, fx, indexing="ij")
