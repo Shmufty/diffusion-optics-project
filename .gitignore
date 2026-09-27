@@ -230,3 +230,11 @@ capillary_system/*.mat
 # still well over GitHub's 100MB push limit) -- hand this off to the
 # professor separately (zip/drive), not via git.
 submission/capillary_system/*.mat
+
+# Project-specific: the two lighter variants of that same bundled tissue
+# data -- submission_lite/ (XY-resampled to 281x281, ~359MB) and
+# submission_without_mask_f0_hr/ (full resolution, unused mask_f0_hr
+# removed, ~277MB). Both still exceed GitHub's 100MB push limit;
+# regenerate via make_submission_lite.py / make_submission_without_mask_f0_hr.py.
+submission_lite/capillary_system/*.mat
+submission_without_mask_f0_hr/capillary_system/*.mat
