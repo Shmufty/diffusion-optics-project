@@ -58,6 +58,20 @@ t=0-referenced normalization only guarantees g2(0)=1. By Cauchy-Schwarz,
 g2(tau) <= sqrt(<I(tau)^2>/<I(0)^2>), which exceeds 1 whenever frame tau
 has more spatial contrast than the t=0 reference frame; this is a
 legitimate property of the formula, not a bug.
+
+A final set of figures continues BOTH u_out_by_t and u_out_uncorrected_by_t
+one step further: both already sit at the same plane as u_in (the
+corrected path's two -eps_um backpropagations, and the uncorrected path's
+single -2*eps_um backpropagation, both cancel the +2*eps_um forward pass
+through the tissue). From there, each is propagated FORWARD by another
+2*eps_um of free space (no aberration/correction planes -- plain
+angular-spectrum propagation), landing 2*epsilon past the refocus plane.
+Two amplitude-grid figures show this for each path, and a g2(tau)
+comparison figure (both paths overlaid) checks whether the corrected
+path's tight, near-diffraction-limited focus -- being more sensitive to
+the residual mismatch between the fixed t=0 correction and the actual,
+flowing tissue -- decorrelates faster once it's allowed to spread, versus
+the already-diffuse uncorrected path.
 """
 import os
 
@@ -196,6 +210,24 @@ def plot_speckle_statistics(tau, g2_corr, out_path):
     print(f"Saved plot to {out_path}")
 
 
+def plot_g2_comparison(tau, g2_corr, g2_uncorr, title, out_path):
+    """Same g2(tau) definition as compute_g2_spatial/plot_speckle_statistics,
+    but both series (corrected, uncorrected) overlaid on one axes for a
+    direct decorrelation-speed comparison."""
+    fig, ax = plt.subplots(1, 1, figsize=(5, 4.5))
+
+    ax.plot(tau, g2_corr, "o-", color="C0", label="corrected")
+    ax.plot(tau, g2_uncorr, "s-", color="C1", label="uncorrected")
+    ax.set_xlabel(r"$\tau$ [s]")
+    ax.set_ylabel(r"$g_2(\tau)$")
+    ax.set_title(title, fontsize=11)
+    ax.legend(fontsize=8)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    print(f"Saved plot to {out_path}")
+
+
 def setup():
     """Shared setup: load the background tissue, build coordinate grids,
     compute the t=0-calibrated fixed correction planes, and the point-
@@ -293,6 +325,54 @@ def main():
     plot_speckle_statistics(
         tau, g2_corr,
         os.path.join(OUTPUT_DIR, "speckle_correlation_statistics.png"),
+    )
+
+    # --- Further forward propagation past the refocus/backpropagation
+    # plane, both paths ---
+    # u_out_by_t/u_out_uncorrected_by_t both already sit at the SAME plane
+    # as u_in (net -2*eps_um backpropagation cancels the +2*eps_um forward
+    # pass through the tissue). Here we continue each one FORWARD by another
+    # 2*eps_um of free space (no aberration/correction planes -- just
+    # angular-spectrum propagation), to see how the corrected (tightly
+    # refocused) vs. uncorrected (already-diffuse) speckle pattern each
+    # spread/decorrelate as they leave that plane. Hypothesis: the
+    # corrected path's tight focus is more sensitive to the residual
+    # tissue-vs-t=0-calibration mismatch and so should decorrelate FASTER
+    # than the already-diffuse uncorrected path.
+    u_out_prop_by_t = [
+        angular_spectrum_propagate(u, 2 * s["eps_um"], LAMBDA_UM, s["dx_um"])
+        for u in u_out_by_t
+    ]
+    u_out_uncorrected_prop_by_t = [
+        angular_spectrum_propagate(u, 2 * s["eps_um"], LAMBDA_UM, s["dx_um"])
+        for u in u_out_uncorrected_by_t
+    ]
+
+    # t=0 corrected-propagated frame is the new "ground truth" peak, shared
+    # by both grids below, same convention as vmax above.
+    vmax_prop = np.abs(u_out_prop_by_t[0]).max()
+
+    plot_grid(
+        u_out_prop_by_t, timesteps, vmax_prop,
+        f"Sim step 3: corrected path, further propagated +2*epsilon past refocus, "
+        f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue, |u_out|",
+        os.path.join(OUTPUT_DIR, "rbc_flow_correction_u_out_propagated2eps.png"),
+    )
+    plot_grid(
+        u_out_uncorrected_prop_by_t, timesteps, vmax_prop,
+        f"Sim step 3: uncorrected path, further propagated +2*epsilon past refocus, "
+        f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue, |u_out|",
+        os.path.join(OUTPUT_DIR, "rbc_flow_no_correction_u_out_propagated2eps.png"),
+    )
+
+    g2_corr_prop = compute_g2_spatial(u_out_prop_by_t)
+    g2_uncorr_prop = compute_g2_spatial(u_out_uncorrected_prop_by_t)
+
+    plot_g2_comparison(
+        tau, g2_corr_prop, g2_uncorr_prop,
+        "Intensity autocorrelation $g_2$, +2*epsilon past refocus\n"
+        "(spatial average, referenced to t=0)",
+        os.path.join(OUTPUT_DIR, "speckle_correlation_statistics_propagated2eps.png"),
     )
 
     plt.show()
