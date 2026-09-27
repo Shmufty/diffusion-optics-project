@@ -29,12 +29,29 @@ at all (no B~, no A~). Uses the SAME shared color scale (vmax from the
 corrected t=0 ground truth) as the first figure, so the two are directly,
 visually comparable on one absolute scale.
 
-A third figure adds a speckle correlation statistic from course_material/
+Before computing any correlation statistic, BOTH u_out_by_t and
+u_out_uncorrected_by_t are carried one step further: both already sit at
+the same plane as u_in (the corrected path's two -eps_um
+backpropagations, and the uncorrected path's single -2*eps_um
+backpropagation, both cancel the +2*eps_um forward pass through the
+tissue). From there, each is propagated FORWARD by another 2*eps_um of
+free space (no aberration/correction planes -- plain angular-spectrum
+propagation), landing 2*epsilon past the refocus plane. Two amplitude-
+grid figures show this for each path. g2(tau) is deliberately computed on
+THIS propagated field, not the raw refocus-plane field: at zero
+propagation distance the corrected field is a near-singular case for a
+spatial-average intensity correlation (almost all signal energy sits in
+a handful of central pixels -- the "spot"), which isn't representative of
+an actual extended speckle pattern; propagating it forward turns it into
+one, which is what g2 is meant to characterize.
+
+Two figures add speckle correlation statistics from course_material/
 "8. Laser speckle contrast imaging and multiple scattering theory2.pdf":
   g2(tau) = <I(0)I(tau)> / <I(0)^2>
-where I(t) = |u_out(t)|^2 (real, non-negative intensity image) and <...>
-is a SPATIAL average (mean over all pixels of the element-wise product,
-e.g. I(0)[x,y]*I(tau)[x,y]) referenced to the t=0 frame -- NOT a temporal
+where I(t) = |u_out_prop(t)|^2 (real, non-negative intensity image, on
+the +2*epsilon-propagated field described above) and <...> is a SPATIAL
+average (mean over all pixels of the element-wise product, e.g.
+I(0)[x,y]*I(tau)[x,y]) referenced to the t=0 frame -- NOT a temporal
 average over multiple (t,t+tau) pairs. The denominator is the NUMERATOR'S
 OWN value at tau=0 (<I(0)*I(0)>=<I(0)^2>, mean of I0 squared -- NOT
 <I(0)>^2, mean of I0 then squared; the two differ whenever I(0) isn't
@@ -49,29 +66,15 @@ camera-based speckle imaging (the PDF's slides 7-9) works with intensity
 statistics, not field statistics: a camera only ever records |E|^2,
 never E itself. Using intensity avoids that problem (no cancellation:
 I>=0 everywhere) and gives a constant, large sample count (~Nx^2 pixels)
-at every tau lag. Computed for the corrected path only for now (u_out_by_t);
-u_out_uncorrected_by_t is still computed (used for the second figure
-above) but its g2 is left out of the plot.
+at every tau lag. The first figure plots the corrected path only; the
+second overlays both corrected and uncorrected for a direct decorrelation-
+speed comparison.
 
 Note: g2(tau) for tau>0 is NOT bounded by 1 -- the asymmetric,
 t=0-referenced normalization only guarantees g2(0)=1. By Cauchy-Schwarz,
 g2(tau) <= sqrt(<I(tau)^2>/<I(0)^2>), which exceeds 1 whenever frame tau
 has more spatial contrast than the t=0 reference frame; this is a
 legitimate property of the formula, not a bug.
-
-A final set of figures continues BOTH u_out_by_t and u_out_uncorrected_by_t
-one step further: both already sit at the same plane as u_in (the
-corrected path's two -eps_um backpropagations, and the uncorrected path's
-single -2*eps_um backpropagation, both cancel the +2*eps_um forward pass
-through the tissue). From there, each is propagated FORWARD by another
-2*eps_um of free space (no aberration/correction planes -- plain
-angular-spectrum propagation), landing 2*epsilon past the refocus plane.
-Two amplitude-grid figures show this for each path, and a g2(tau)
-comparison figure (both paths overlaid) checks whether the corrected
-path's tight, near-diffraction-limited focus -- being more sensitive to
-the residual mismatch between the fixed t=0 correction and the actual,
-flowing tissue -- decorrelates faster once it's allowed to spread, versus
-the already-diffuse uncorrected path.
 """
 import os
 
@@ -196,13 +199,16 @@ def compute_g2_spatial(fields_by_t):
 
 def plot_speckle_statistics(tau, g2_corr, out_path):
     # Uncorrected g2 left out for now (still computable via compute_g2_spatial
-    # on u_out_uncorrected_by_t if needed later -- just not plotted here).
+    # on u_out_uncorrected_prop_by_t if needed later -- just not plotted here;
+    # see plot_g2_comparison for the two-path version).
     fig, ax = plt.subplots(1, 1, figsize=(5, 4.5))
 
     ax.plot(tau, g2_corr, "o-", color="C0", label="corrected")
     ax.set_xlabel(r"$\tau$ [s]")
     ax.set_ylabel(r"$g_2(\tau)$")
-    ax.set_title("Intensity autocorrelation $g_2$\n(spatial average, referenced to t=0)", fontsize=11)
+    ax.set_title(
+        "Intensity autocorrelation $g_2$, +2*epsilon past refocus\n"
+        "(spatial average, referenced to t=0)", fontsize=11)
     ax.legend(fontsize=8)
 
     fig.tight_layout()
@@ -315,30 +321,10 @@ def main():
         os.path.join(OUTPUT_DIR, "rbc_flow_no_correction_u_out.png"),
     )
 
-    # Speckle correlation statistic g2(tau), spatially averaged (referenced
-    # to t=0) intensity autocorrelation, per course_material/"8. Laser
-    # speckle contrast imaging and multiple scattering theory2.pdf".
-    # Corrected path only for now (see plot_speckle_statistics).
-    tau = np.array(timesteps)
-    g2_corr = compute_g2_spatial(u_out_by_t)
-
-    plot_speckle_statistics(
-        tau, g2_corr,
-        os.path.join(OUTPUT_DIR, "speckle_correlation_statistics.png"),
-    )
-
     # --- Further forward propagation past the refocus/backpropagation
-    # plane, both paths ---
-    # u_out_by_t/u_out_uncorrected_by_t both already sit at the SAME plane
-    # as u_in (net -2*eps_um backpropagation cancels the +2*eps_um forward
-    # pass through the tissue). Here we continue each one FORWARD by another
-    # 2*eps_um of free space (no aberration/correction planes -- just
-    # angular-spectrum propagation), to see how the corrected (tightly
-    # refocused) vs. uncorrected (already-diffuse) speckle pattern each
-    # spread/decorrelate as they leave that plane. Hypothesis: the
-    # corrected path's tight focus is more sensitive to the residual
-    # tissue-vs-t=0-calibration mismatch and so should decorrelate FASTER
-    # than the already-diffuse uncorrected path.
+    # plane, both paths --- (see module docstring for why: this is the
+    # actual, extended speckle pattern the g2 statistics below are
+    # computed on, NOT the raw refocus-plane "spot").
     u_out_prop_by_t = [
         angular_spectrum_propagate(u, 2 * s["eps_um"], LAMBDA_UM, s["dx_um"])
         for u in u_out_by_t
@@ -365,11 +351,21 @@ def main():
         os.path.join(OUTPUT_DIR, "rbc_flow_no_correction_u_out_propagated2eps.png"),
     )
 
-    g2_corr_prop = compute_g2_spatial(u_out_prop_by_t)
-    g2_uncorr_prop = compute_g2_spatial(u_out_uncorrected_prop_by_t)
+    # Speckle correlation statistic g2(tau), spatially averaged (referenced
+    # to t=0) intensity autocorrelation, per course_material/"8. Laser
+    # speckle contrast imaging and multiple scattering theory2.pdf".
+    # Computed on the +2*epsilon-propagated field above, for both paths.
+    tau = np.array(timesteps)
+    g2_corr = compute_g2_spatial(u_out_prop_by_t)
+    g2_uncorr = compute_g2_spatial(u_out_uncorrected_prop_by_t)
+
+    plot_speckle_statistics(
+        tau, g2_corr,
+        os.path.join(OUTPUT_DIR, "speckle_correlation_statistics.png"),
+    )
 
     plot_g2_comparison(
-        tau, g2_corr_prop, g2_uncorr_prop,
+        tau, g2_corr, g2_uncorr,
         "Intensity autocorrelation $g_2$, +2*epsilon past refocus\n"
         "(spatial average, referenced to t=0)",
         os.path.join(OUTPUT_DIR, "speckle_correlation_statistics_propagated2eps.png"),
