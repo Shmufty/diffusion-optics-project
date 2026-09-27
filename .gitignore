@@ -224,3 +224,9 @@ __marimo__/
 # corresponding run_*.m script) -- well over GitHub's 100MB push limit,
 # no Git LFS set up in this repo.
 capillary_system/*.mat
+
+# Project-specific: submission/'s own bundled copy of the same tissue
+# data (submission/main.py needs it locally to run standalone, but it's
+# still well over GitHub's 100MB push limit) -- hand this off to the
+# professor separately (zip/drive), not via git.
+submission/capillary_system/*.mat

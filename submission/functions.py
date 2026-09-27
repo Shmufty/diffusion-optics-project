@@ -7,12 +7,16 @@ contained (main.py + this one file) without needing the project's full,
 scattered module structure. Nothing here is new code: each piece is
 copied unchanged from its original module (noted per section below).
 
-NOT included on purpose: the generated tissue data (mask_f_hr etc., the
-aberration/correction plane data) is NOT attached to this submission --
-see the accompanying docx for why, and for how to regenerate it via the
-project's tissue_3d_generator.m / capillary_system/run_tissue_3d_
-generator_capillary_35x35x15_two_rbcs.m.
+The generated tissue data (mask_f_hr etc., the aberration/correction
+plane data) IS included in this submission, at
+submission/capillary_system/tissue_background_35x35x15_two_rbcs.mat, so
+this folder is fully self-contained and runnable as-is. See the
+accompanying docx for how to regenerate it from scratch via the project's
+tissue_3d_generator.m / capillary_system/run_tissue_3d_generator_
+capillary_35x35x15_two_rbcs.m, if ever needed.
 """
+import os
+
 import numpy as np
 import h5py
 
@@ -140,7 +144,13 @@ def reconstruct_coarse(combined, touched, mask_f_background, z_grid1, z_grid1_sp
 # reconstruction for the flowing capillary scenario.
 # =============================================================================
 
-MAT_PATH = "capillary_system/tissue_background_35x35x15_two_rbcs.mat"
+# Anchored to this file's own directory (not the process cwd), so the
+# bundled copy of the tissue data resolves correctly regardless of where
+# main.py is invoked from -- matches main.py's ANIMATION_PATH convention.
+MAT_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "capillary_system", "tissue_background_35x35x15_two_rbcs.mat",
+)
 TIME_STEP = 0.25
 
 

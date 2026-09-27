@@ -77,8 +77,9 @@ the already-diffuse uncorrected path.
 This is a course-submission copy: all supporting functions this file
 needs (imported below from functions.py) are consolidated in that one
 sibling file instead of the full project's multi-module structure. The
-generated tissue data (mask_f_hr etc.) is NOT included in this folder --
-see the accompanying docx.
+generated tissue data (mask_f_hr etc.) IS included in this folder, at
+capillary_system/tissue_background_35x35x15_two_rbcs.mat, so this folder
+is fully self-contained and can be run as-is.
 """
 import os
 
@@ -89,6 +90,12 @@ from functions import LAMBDA_UM, angular_spectrum_propagate, build_x_grid, load_
 
 OUTPUT_DIR = "step 3 results"
 GRID_COLS = 4
+
+# Anchored to this file's own directory (not the process cwd) so the
+# animation always lands inside the submission folder itself, regardless
+# of where main.py is invoked from -- unlike OUTPUT_DIR above (which is
+# cwd-relative, matching the rest of the project's convention).
+ANIMATION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rbc_flow_speckle_animation.gif")
 
 
 def run_pipeline(u_in, A_t, B_t, A_tilde_fixed, B_tilde_fixed, eps_um, dx_um):
@@ -215,6 +222,51 @@ def plot_speckle_statistics(tau, g2_corr, out_path):
     print(f"Saved plot to {out_path}")
 
 
+def save_speckle_animation(u_out_by_t, u_out_uncorrected_by_t, timesteps, out_path, crop=50):
+    """1x2 animated GIF: |u_out(t)| corrected (left) vs. uncorrected
+    (right), both cropped to a crop x crop pixel window around the center
+    (same visibility reasoning as the cropped50 static figure -- the
+    corrected spot is otherwise too small to see against the full frame).
+    Each panel is scaled to its OWN global max across all 17 frames
+    (independent vmax per panel) -- unlike the static comparison figures,
+    which intentionally share one absolute scale to show the ~2-orders-of-
+    magnitude intensity gap; here the goal is just to make each path's own
+    speckle dynamics visible side by side, which a shared scale would
+    mostly hide for the uncorrected (much dimmer) panel."""
+    from matplotlib.animation import FuncAnimation, PillowWriter
+
+    corr_frames = [crop_center(np.abs(u), crop) for u in u_out_by_t]
+    uncorr_frames = [crop_center(np.abs(u), crop) for u in u_out_uncorrected_by_t]
+    vmax_corr = max(a.max() for a in corr_frames)
+    vmax_uncorr = max(a.max() for a in uncorr_frames)
+
+    fig, axes = plt.subplots(1, 2, figsize=(9, 4.5))
+    im0 = axes[0].imshow(corr_frames[0], cmap="inferno", vmin=0, vmax=vmax_corr)
+    axes[0].axis("off")
+    fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+    title0 = axes[0].set_title(f"corrected, t={timesteps[0]:g}s", fontsize=11)
+
+    im1 = axes[1].imshow(uncorr_frames[0], cmap="inferno", vmin=0, vmax=vmax_uncorr)
+    axes[1].axis("off")
+    fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+    title1 = axes[1].set_title(f"uncorrected, t={timesteps[0]:g}s", fontsize=11)
+
+    fig.suptitle(f"|u_out(t)|: corrected vs. uncorrected (cropped {crop}x{crop}px around center)")
+    fig.tight_layout()
+
+    def update(i):
+        im0.set_data(corr_frames[i])
+        title0.set_text(f"corrected, t={timesteps[i]:g}s")
+        im1.set_data(uncorr_frames[i])
+        title1.set_text(f"uncorrected, t={timesteps[i]:g}s")
+        return im0, im1, title0, title1
+
+    ani = FuncAnimation(fig, update, frames=len(timesteps), interval=400)
+    ani.save(out_path, writer=PillowWriter(fps=2))
+    plt.close(fig)
+    print(f"Saved animation to {out_path}")
+
+
 def plot_g2_comparison(tau, g2_corr, g2_uncorr, title, out_path):
     """Same g2(tau) definition as compute_g2_spatial/plot_speckle_statistics,
     but both series (corrected, uncorrected) overlaid on one axes for a
@@ -296,6 +348,8 @@ def main():
     dims = bg["tissue_dims_um"]
 
     plot_input_field(s["u_in"], os.path.join(OUTPUT_DIR, "input_field.png"))
+
+    save_speckle_animation(u_out_by_t, u_out_uncorrected_by_t, timesteps, ANIMATION_PATH)
 
     plot_grid(
         u_out_by_t, timesteps, vmax,
