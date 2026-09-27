@@ -1,4 +1,4 @@
-"""Sim step 3: apply a t=0-calibrated correction to the flowing two-RBC
+"""Apply a t=0-calibrated correction to the flowing two-RBC
 system (35x35x15um tissue, capillary_system/tissue_background_35x35x15_
 two_rbcs.mat), across all 17 timesteps from step_two_two_rbcs.py's
 dynamic stopping rule (t=0 to t=4.0s, 0.25s steps).
@@ -14,6 +14,15 @@ applied UNCHANGED to every subsequent timestep's actual (A(t), B(t)).
 This tests how a wavefront correction calibrated on a "clean" sample
 degrades as blood actually flows through it.
 
+Three figures show the aberration planes themselves -- the input to the
+correction problem: plane A (tissue entrance) and plane B (exit face)
+across all timesteps, one figure each, plus a 4-panel summary of plane A
+spanning t=0 to the final timestep. The planes are phase-only, so these
+plot np.angle on a fixed -pi..pi twilight scale, making every panel
+comparable both within and across the figures. Read together with the
+fixed correction described above, they are what the correction is losing
+track of: A~ and B~ stay frozen at their t=0 conjugates while these drift.
+
 All 17 |u_out(t)| panels share ONE fixed color scale (vmin=0,
 vmax=|u_out(t=0)|.max()) so they're directly comparable to each other.
 t=0 is the "ground truth" reference: since the fixed correction is
@@ -28,6 +37,29 @@ backpropagated 2*epsilon in one step with NO correction planes applied
 at all (no B~, no A~). Uses the SAME shared color scale (vmax from the
 corrected t=0 ground truth) as the first figure, so the two are directly,
 visually comparable on one absolute scale.
+
+A final figure is the actual robustness estimate. Correction efficiency
+is measured by a Strehl-like peak intensity at the refocus plane (both
+paths normalised to the corrected t=0 frame, the ideal-correction ground
+truth), NOT by g2 -- which the figures below show is nearly blind to
+whether the correction is on at all. That efficiency is then plotted
+against how far the SAMPLE has drifted from its calibration state,
+D = 1 - g2_uncorrected, rather than against elapsed time. Time is only a
+proxy for sample change and a poor one here (the flow speeds up, the tube
+dilates, the cells enter and leave at particular moments), so a
+"correction lifetime in seconds" read off this run would describe the
+clip rather than the method. Plotting against drift removes all of that
+from the x-axis and makes the estimate comparable against other flow
+conditions and geometries. This is where g2 earns its place: not as a
+measure of correction quality, but as the yardstick for the perturbation.
+See functions.py's robustness section for the full argument.
+
+Caveat for interpreting it: the degradation measured here mixes TWO
+causes, which this run does not separate -- the RBCs flowing through, AND
+the capillary itself dilating (functions.diameter_um sweeps 4um at t=0 to
+10um at t=4.0s, an 8s sinusoid, with RBC speed tracking it), so the
+t=0-calibrated correction is being judged against a sample whose tube
+geometry has also changed out from under it.
 
 Before computing any correlation statistic, BOTH u_out_by_t and
 u_out_uncorrected_by_t are carried one step further: both already sit at
@@ -47,7 +79,7 @@ one, which is what g2 is meant to characterize. The speckle animation
 (see save_speckle_animation) is likewise built from this propagated
 field, for the same reason.
 
-Two figures add speckle correlation statistics from course_material/
+A figure adds speckle correlation statistics from course_material/
 "8. Laser speckle contrast imaging and multiple scattering theory2.pdf":
   g2(tau) = <I(0)I(tau)> / <I(0)^2>
 where I(t) = |u_out_prop(t)|^2 (real, non-negative intensity image, on
@@ -68,9 +100,8 @@ camera-based speckle imaging (the PDF's slides 7-9) works with intensity
 statistics, not field statistics: a camera only ever records |E|^2,
 never E itself. Using intensity avoids that problem (no cancellation:
 I>=0 everywhere) and gives a constant, large sample count (~Nx^2 pixels)
-at every tau lag. The first figure plots the corrected path only; the
-second overlays both corrected and uncorrected for a direct decorrelation-
-speed comparison.
+at every tau lag. The figure overlays both corrected and uncorrected for
+a direct decorrelation-speed comparison.
 
 Note: g2(tau) for tau>0 is NOT bounded by 1 -- the asymmetric,
 t=0-referenced normalization only guarantees g2(0)=1. By Cauchy-Schwarz,
@@ -91,16 +122,19 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from functions import LAMBDA_UM, angular_spectrum_propagate, build_x_grid, load_background, MAT_PATH, build_timeline, compute_planes_at
+from functions import (LAMBDA_UM, angular_spectrum_propagate, build_x_grid, load_background,
+                       MAT_PATH, build_timeline, compute_planes_at, crop_center,
+                       compute_focus_quality, compute_robustness, plot_robustness,
+                       report_robustness)
 
-OUTPUT_DIR = "step 3 results"
 GRID_COLS = 4
 
-# Anchored to this file's own directory (not the process cwd) so the
-# animation always lands inside the submission folder itself, regardless
-# of where main.py is invoked from -- unlike OUTPUT_DIR above (which is
-# cwd-relative, matching the rest of the project's convention).
-ANIMATION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rbc_flow_speckle_animation.gif")
+# Anchored to this file's own directory (not the process cwd) so results
+# always land inside the submission folder itself, regardless of where
+# main.py is invoked from.
+SUBMISSION_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(SUBMISSION_DIR, "results")
+ANIMATION_PATH = os.path.join(SUBMISSION_DIR, "rbc_flow_speckle_animation.gif")
 
 
 def run_pipeline(u_in, A_t, B_t, A_tilde_fixed, B_tilde_fixed, eps_um, dx_um):
@@ -138,15 +172,6 @@ def run_pipeline_uncorrected(u_in, A_t, B_t, eps_um, dx_um):
     return u_out_uncorrected
 
 
-def crop_center(arr, size):
-    """size x size window centered on arr's own center pixel (arr is
-    square, same convention as the point source placed at [Nx//2, Nx//2])."""
-    n = arr.shape[0]
-    half = size // 2
-    start = n // 2 - half
-    return arr[start:start + size, start:start + size]
-
-
 def plot_grid(values_by_t, timesteps, vmax, title, out_path, crop=None):
     n_rows = -(-len(timesteps) // GRID_COLS)  # ceil
     fig, axes = plt.subplots(n_rows, GRID_COLS, figsize=(4 * GRID_COLS, 4 * n_rows))
@@ -160,6 +185,30 @@ def plot_grid(values_by_t, timesteps, vmax, title, out_path, crop=None):
         ax.set_title(f"t={t:g}s", fontsize=10)
         ax.axis("off")
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    for i in range(len(timesteps), n_rows * GRID_COLS):
+        axes[i // GRID_COLS, i % GRID_COLS].axis("off")
+
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    print(f"Saved plot to {out_path}")
+
+
+def plot_phase_grid(planes_by_t, timesteps, title, out_path):
+    """Aberration-plane phase across a set of timesteps. The planes are
+    phase-only (unit magnitude everywhere), so |plane| carries no
+    information and np.angle is what gets plotted -- twilight on a fixed
+    -pi..pi scale, matching the project's other aberration-plane figures,
+    so panels are directly comparable to each other and across figures."""
+    n_rows = -(-len(timesteps) // GRID_COLS)  # ceil
+    fig, axes = plt.subplots(n_rows, GRID_COLS, figsize=(4 * GRID_COLS, 4 * n_rows))
+    axes = np.atleast_2d(axes)
+    for i, t in enumerate(timesteps):
+        ax = axes[i // GRID_COLS, i % GRID_COLS]
+        im = ax.imshow(np.angle(planes_by_t[i]), cmap="twilight", vmin=-np.pi, vmax=np.pi)
+        ax.set_title(f"t={t:g}s", fontsize=10)
+        ax.axis("off")
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="phase [rad]")
     for i in range(len(timesteps), n_rows * GRID_COLS):
         axes[i // GRID_COLS, i % GRID_COLS].axis("off")
 
@@ -209,25 +258,6 @@ def compute_g2_spatial(fields_by_t):
     G2 = np.array([np.mean(I0 * np.abs(Et) ** 2) for Et in fields_by_t])
     g2 = G2 / denom
     return g2
-
-
-def plot_speckle_statistics(tau, g2_corr, out_path):
-    # Uncorrected g2 left out for now (still computable via compute_g2_spatial
-    # on u_out_uncorrected_prop_by_t if needed later -- just not plotted here;
-    # see plot_g2_comparison for the two-path version).
-    fig, ax = plt.subplots(1, 1, figsize=(5, 4.5))
-
-    ax.plot(tau, g2_corr, "o-", color="C0", label="corrected")
-    ax.set_xlabel(r"$\tau$ [s]")
-    ax.set_ylabel(r"$g_2(\tau)$")
-    ax.set_title(
-        "Intensity autocorrelation $g_2$, +2*epsilon past refocus\n"
-        "(spatial average, referenced to t=0)", fontsize=11)
-    ax.legend(fontsize=8)
-
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    print(f"Saved plot to {out_path}")
 
 
 def save_speckle_animation(u_out_prop_by_t, u_out_uncorrected_prop_by_t, timesteps, out_path, crop=None):
@@ -286,9 +316,9 @@ def save_speckle_animation(u_out_prop_by_t, u_out_uncorrected_prop_by_t, timeste
 
 
 def plot_g2_comparison(tau, g2_corr, g2_uncorr, title, out_path):
-    """Same g2(tau) definition as compute_g2_spatial/plot_speckle_statistics,
-    but both series (corrected, uncorrected) overlaid on one axes for a
-    direct decorrelation-speed comparison."""
+    """g2(tau) as defined in compute_g2_spatial, with both series
+    (corrected, uncorrected) overlaid on one axes for a direct
+    decorrelation-speed comparison."""
     fig, ax = plt.subplots(1, 1, figsize=(5, 4.5))
 
     ax.plot(tau, g2_corr, "o-", color="C0", label="corrected")
@@ -336,16 +366,23 @@ def setup():
 
 def compute_output_series(s):
     """u_out_by_t (corrected) and u_out_uncorrected_by_t for every
-    timestep, given the shared setup dict from setup()."""
+    timestep, given the shared setup dict from setup(), plus the
+    aberration planes A(t) and B(t) each was propagated through --
+    returned rather than discarded so they can be plotted without paying
+    for a second pass of compute_planes_at, which dominates the runtime."""
     u_out_by_t = []
     u_out_uncorrected_by_t = []
+    A_by_t = []
+    B_by_t = []
     for t in s["timesteps"]:
         A_t, B_t = compute_planes_at(t, s["bg"], s["x_grid1"], s["t_entry_2"], s["h_z_stp"])
+        A_by_t.append(A_t)
+        B_by_t.append(B_t)
         u_out_by_t.append(run_pipeline(
             s["u_in"], A_t, B_t, s["A_tilde_fixed"], s["B_tilde_fixed"], s["eps_um"], s["dx_um"]))
         u_out_uncorrected_by_t.append(run_pipeline_uncorrected(
             s["u_in"], A_t, B_t, s["eps_um"], s["dx_um"]))
-    return u_out_by_t, u_out_uncorrected_by_t
+    return u_out_by_t, u_out_uncorrected_by_t, A_by_t, B_by_t
 
 
 def main():
@@ -354,7 +391,7 @@ def main():
     bg = s["bg"]
     print(f"{len(timesteps)} timesteps: t=0 to {timesteps[-1]:.2f}s")
 
-    u_out_by_t, u_out_uncorrected_by_t = compute_output_series(s)
+    u_out_by_t, u_out_uncorrected_by_t, A_by_t, B_by_t = compute_output_series(s)
 
     # t=0 is the ground truth: the fixed correction is exact there, so
     # this is the best-case (ideal-correction) peak -- shared across all
@@ -367,9 +404,36 @@ def main():
 
     plot_input_field(s["u_in"], os.path.join(OUTPUT_DIR, "input_field.png"))
 
+    # The aberration planes themselves -- the input to the correction
+    # problem, i.e. what the flowing cells actually do to the wavefront and
+    # how far the fixed t=0-calibrated correction's target drifts from what
+    # it was calibrated on.
+    plot_phase_grid(
+        A_by_t, timesteps,
+        f"Aberration plane $A_1$ (tissue entrance) over time, phase, "
+        f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue",
+        os.path.join(OUTPUT_DIR, "aberration_plane_A.png"),
+    )
+    plot_phase_grid(
+        B_by_t, timesteps,
+        f"Aberration plane B (tissue exit) over time, phase, "
+        f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue",
+        os.path.join(OUTPUT_DIR, "aberration_plane_B.png"),
+    )
+    # Same plane A, thinned to 4 panels spanning the full run (first t=0,
+    # last the final timestep, the middle two as evenly spaced as 17
+    # timesteps allow) -- a readable summary of the 17-panel figure above.
+    sel = np.linspace(0, len(timesteps) - 1, 4).round().astype(int)
+    plot_phase_grid(
+        [A_by_t[i] for i in sel], [timesteps[i] for i in sel],
+        f"Aberration plane $A_1$ (tissue entrance), phase, 4 timesteps spanning "
+        f"t=0 to t={timesteps[-1]:g}s",
+        os.path.join(OUTPUT_DIR, "aberration_plane_A_4_timesteps.png"),
+    )
+
     plot_grid(
         u_out_by_t, timesteps, vmax,
-        f"Sim step 3: t=0-calibrated (fixed) correction applied through the flow, "
+        f"t=0-calibrated (fixed) correction applied through the flow, "
         f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue, |u_out|",
         os.path.join(OUTPUT_DIR, "rbc_flow_correction_u_out.png"),
     )
@@ -378,17 +442,19 @@ def main():
     # too small to see clearly against the 351x351 pixel field.
     plot_grid(
         u_out_by_t, timesteps, vmax,
-        f"Sim step 3: t=0-calibrated (fixed) correction applied through the flow, "
+        f"t=0-calibrated (fixed) correction applied through the flow, "
         f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue, |u_out| (cropped 50x50px around center)",
         os.path.join(OUTPUT_DIR, "rbc_flow_correction_u_out_cropped50.png"),
         crop=50,
     )
     plot_grid(
         u_out_uncorrected_by_t, timesteps, vmax,
-        f"Sim step 3: NO correction (light through tissue, backpropagated 2*epsilon), "
+        f"NO correction (light through tissue, backpropagated 2*epsilon), "
         f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue, |u_out|",
         os.path.join(OUTPUT_DIR, "rbc_flow_no_correction_u_out.png"),
     )
+
+    strehl_corr, _, _, _ = compute_focus_quality(u_out_by_t, u_out_uncorrected_by_t)
 
     # --- Further forward propagation past the refocus/backpropagation
     # plane, both paths --- (see module docstring for why: this is the
@@ -411,13 +477,13 @@ def main():
 
     plot_grid(
         u_out_prop_by_t, timesteps, vmax_prop,
-        f"Sim step 3: corrected path, further propagated +2*epsilon past refocus, "
+        f"corrected path, further propagated +2*epsilon past refocus, "
         f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue, |u_out|",
         os.path.join(OUTPUT_DIR, "rbc_flow_correction_u_out_propagated2eps.png"),
     )
     plot_grid(
         u_out_uncorrected_prop_by_t, timesteps, vmax_prop,
-        f"Sim step 3: uncorrected path, further propagated +2*epsilon past refocus, "
+        f"uncorrected path, further propagated +2*epsilon past refocus, "
         f"{dims[0]:g}x{dims[1]:g}x{dims[2]:g}um tissue, |u_out|",
         os.path.join(OUTPUT_DIR, "rbc_flow_no_correction_u_out_propagated2eps.png"),
     )
@@ -430,17 +496,20 @@ def main():
     g2_corr = compute_g2_spatial(u_out_prop_by_t)
     g2_uncorr = compute_g2_spatial(u_out_uncorrected_prop_by_t)
 
-    plot_speckle_statistics(
-        tau, g2_corr,
-        os.path.join(OUTPUT_DIR, "speckle_correlation_statistics.png"),
-    )
-
     plot_g2_comparison(
         tau, g2_corr, g2_uncorr,
         "Intensity autocorrelation $g_2$, +2*epsilon past refocus\n"
         "(spatial average, referenced to t=0)",
         os.path.join(OUTPUT_DIR, "speckle_correlation_statistics_propagated2eps.png"),
     )
+
+    # Robustness: the correction's efficiency (Strehl) re-parametrised by how
+    # far the sample has drifted from calibration (D = 1 - g2_uncorrected)
+    # instead of by elapsed time, so the estimate is not tied to this run's
+    # flow speed and timing. See functions.py's robustness section.
+    r = compute_robustness(timesteps, g2_uncorr, strehl_corr, bg["x_max"])
+    report_robustness(r)
+    plot_robustness(r, os.path.join(OUTPUT_DIR, "correction_robustness_vs_drift.png"))
 
     plt.show()
 

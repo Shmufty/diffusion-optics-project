@@ -4,8 +4,11 @@ This file gathers every function/constant that main.py imports, directly
 or transitively, from the full project's step_one.py, step_two.py and
 step_two_two_rbcs.py modules -- so this submission folder is self-
 contained (main.py + this one file) without needing the project's full,
-scattered module structure. Nothing here is new code: each piece is
-copied unchanged from its original module (noted per section below).
+scattered module structure. Everything up to and including the
+compute_planes_at section is copied unchanged from its original module
+(noted per section below); the final section, the robustness analysis, is
+new to this submission and has no counterpart in the project's step_*.py
+modules.
 
 The generated tissue data (mask_f_hr etc., the aberration/correction
 plane data) IS included in this submission, at
@@ -19,6 +22,7 @@ import os
 
 import numpy as np
 import h5py
+import matplotlib.pyplot as plt
 
 # =============================================================================
 # From step_one.py: wavelength constant and angular-spectrum propagation.
@@ -272,3 +276,167 @@ def compute_planes_at(t, bg, x_grid1, t_entry_2, h_z_stp):
     A = np.exp(1j * np.angle(coarse[:, :, 0]))
     B = np.exp(1j * np.angle(coarse[:, :, 1]))
     return A, B
+
+
+# =============================================================================
+# Robustness analysis (new in this submission -- no counterpart in the
+# project's step_*.py modules).
+#
+# The question is how long a correction calibrated ONCE, at t=0, keeps
+# working. Two choices make that estimate transferable rather than a fact
+# about this particular clip:
+#
+#   1. Correction efficiency is measured by a focus metric (Strehl-like
+#      peak intensity, plus core energy fraction), NOT by g2. g2 of the
+#      propagated field turns out to be nearly blind to whether the
+#      correction is on at all -- it tracks the sample's own evolution,
+#      differing by <0.03 between the corrected and uncorrected paths
+#      while the underlying focus quality differs by ~25x.
+#
+#   2. That efficiency is plotted against how far the SAMPLE has drifted
+#      from its calibration state, NOT against elapsed time. Drift is
+#      measured as D = 1 - g2_uncorrected: g2 on the uncorrected path is
+#      the cleanest available measure of how much of the calibration
+#      state survives, and is uncontaminated by the correction's own
+#      ordered t=0 field. This is where g2 earns its place -- as the
+#      yardstick for the perturbation, not as the measurement.
+#
+# Time is only a proxy for sample change, and a poor one here: RBC speed
+# varies (8 um/s at t=0 to 25 um/s at t=4s), the capillary dilates (4um
+# to 10um over the same window), and the cells enter and leave at
+# particular moments, so one second near t=0 corresponds to far less
+# sample change than one second near t=3. Any "correction lifetime in
+# seconds" read off this run describes the clip's timing. Re-parametrising
+# by D removes flow speed, dilation schedule and cell timing from the
+# x-axis -- they act only by driving D -- so the resulting curve estimates
+# a property of the correction method, and can be compared against runs
+# with different flow conditions or geometry.
+# =============================================================================
+
+CORE_PX = 5
+
+
+def crop_center(arr, size):
+    """size x size window centered on arr's own center pixel (arr is
+    square, same convention as the point source placed at [Nx//2, Nx//2])."""
+    n = arr.shape[0]
+    half = size // 2
+    start = n // 2 - half
+    return arr[start:start + size, start:start + size]
+
+
+def compute_focus_quality(u_corr_by_t, u_uncorr_by_t, core_px=CORE_PX):
+    """Focus quality at the refocus plane (i.e. on the raw u_out fields,
+    BEFORE the +2*epsilon forward propagation the g2 statistic uses), for
+    both paths: peak intensity, and the fraction of total energy inside a
+    core_px x core_px window at the frame centre.
+
+    Both peak curves are normalised to the CORRECTED t=0 frame -- the
+    ideal-correction ground truth, where the fixed correction is exact by
+    construction -- so the two paths sit on one absolute scale, the same
+    convention as the shared vmax in the amplitude grids. The corrected
+    curve is then a Strehl ratio: 1.0 at t=0, decaying as the fixed
+    correction goes stale."""
+    I_corr = [np.abs(u) ** 2 for u in u_corr_by_t]
+    I_uncorr = [np.abs(u) ** 2 for u in u_uncorr_by_t]
+    peak_ref = I_corr[0].max()
+    strehl_corr = np.array([I.max() for I in I_corr]) / peak_ref
+    strehl_uncorr = np.array([I.max() for I in I_uncorr]) / peak_ref
+    core_corr = np.array([crop_center(I, core_px).sum() / I.sum() for I in I_corr])
+    core_uncorr = np.array([crop_center(I, core_px).sum() / I.sum() for I in I_uncorr])
+    return strehl_corr, strehl_uncorr, core_corr, core_uncorr
+
+
+def compute_robustness(timesteps, g2_uncorr, strehl, x_max):
+    """Pair the correction's efficiency with the sample drift that caused
+    it, and work out how much of the run is usable for the drift plot.
+
+    Only the leg up to the moment cell 1's leading edge reaches the far
+    edge of the tissue is a clean "sample drifting away from calibration"
+    record. Past it, the cell starts clearing the beam: drift keeps rising
+    for a few more timesteps because cell 2 is still advancing, but it is
+    now a mix of two opposing effects, and shortly after, the sample turns
+    around and drifts back TOWARDS its calibration state -- which would
+    make the curve double back on itself."""
+    t = np.asarray(timesteps, dtype=float)
+    g2_uncorr = np.asarray(g2_uncorr, dtype=float)
+    strehl = np.asarray(strehl, dtype=float)
+
+    t_exit_start = find_time_for_displacement(2 * x_max, t_start=0.0)
+    return dict(
+        t=t,
+        g2_uncorr=g2_uncorr,
+        strehl=strehl,
+        D=1.0 - g2_uncorr,
+        t_exit_start=t_exit_start,
+        n_plot=int(np.searchsorted(t, t_exit_start, side="right")),
+    )
+
+
+def plot_robustness(r, out_path):
+    """(a) the two clocks against time, over the whole run, to motivate the
+    reparametrisation -- correction efficiency and the sample's own
+    similarity to t=0 run down at visibly different rates.
+
+    (b) the same efficiency against drift, truncated to the clean leg."""
+    t, D, S, n = r["t"], r["D"], r["strehl"], r["n_plot"]
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.7))
+
+    ax = axes[0]
+    ax.plot(t, S, "o-", color="C0", label="correction efficiency (Strehl)")
+    ax.plot(t, r["g2_uncorr"], "s-", color="C1",
+            label=r"sample similarity to $t{=}0$  ($g_2$, uncorrected)")
+    ax.set_xlabel(r"$t$ [s]")
+    ax.set_ylabel("normalised to $t=0$")
+    ax.set_ylim(0, 1.05)
+    ax.legend(fontsize=8, loc="lower left")
+    ax.set_title("(a) Normalised Strehl and $g_2$ over time", fontsize=11)
+
+    ax = axes[1]
+    ax.plot(D[:n], S[:n], "o-", color="C0")
+    ax.set_xlabel(r"sample drift   $D = 1 - g_2^{\,\mathrm{uncorr}}$")
+    ax.set_ylabel("Strehl")
+    ax.set_xlim(0, D[:n].max() * 1.08)
+    ax.set_ylim(0, 1.05)
+    ax.set_title(f"(b) efficiency vs. drift, while the sample decorrelates "
+                 f"($t \\leq {t[n - 1]:g}$s)", fontsize=11)
+
+    fig.suptitle("Robustness of the $t=0$-calibrated plane correction: efficiency "
+                 "per unit of sample decorrelation, not per second")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    print(f"Saved plot to {out_path}")
+
+
+def report_robustness(r):
+    """Console summary: the per-timestep table, the drift at which half the
+    correction is gone, and the fragility gain G = (1-Strehl)/D -- the
+    efficiency lost per unit of sample drift. G=1 would mean the correction
+    is exactly as robust as the medium allows; G>1 means it is more fragile
+    than the sample's own change accounts for."""
+    t, D, S = r["t"], r["D"], r["strehl"]
+    G = np.full_like(S, np.nan)
+    G[1:] = (1.0 - S[1:]) / D[1:]
+
+    print(f"{'t':>6} {'g2_unc':>8} {'drift D':>9} {'Strehl':>8} {'1-Strehl':>9} {'G':>7}")
+    for i in range(len(t)):
+        g = "     --" if i == 0 else f"{G[i]:7.2f}"
+        print(f"{t[i]:6.2f} {r['g2_uncorr'][i]:8.4f} {D[i]:9.4f} "
+              f"{S[i]:8.4f} {1 - S[i]:9.4f} {g}")
+
+    i = int(np.argmax(S < 0.5))
+    D_half = np.interp(0.5, [S[i], S[i - 1]], [D[i], D[i - 1]])
+    print(f"\nHalf the correction is gone by D = {D_half:.3f} "
+          f"(sample only {100 * D_half:.1f}% decorrelated)")
+    print(f"Fragility gain G: {np.nanmin(G):.2f} to {np.nanmax(G):.2f}, "
+          f"median {np.nanmedian(G):.2f}")
+
+    turn = int(np.argmax(D))
+    print(f"\nDrift plot truncated at t={r['t_exit_start']:.2f}s, when cell 1's leading "
+          f"edge reaches the far edge and it starts clearing the beam. Drift keeps rising "
+          f"to D={D[turn]:.3f} at t={t[turn]:g}s (cell 2 still advancing) before turning.")
+    print("Beyond the turn the sample drifts back toward calibration -- retrace check:")
+    for j in range(turn + 1, len(t)):
+        S_out = np.interp(D[j], D[:turn + 1], S[:turn + 1])
+        print(f"  t={t[j]:4.2f}s  D={D[j]:.3f}  Strehl={S[j]:.3f}  "
+              f"vs {S_out:.3f} outbound  (diff {S[j] - S_out:+.3f})")
